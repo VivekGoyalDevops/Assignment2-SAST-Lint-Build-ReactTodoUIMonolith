@@ -1,0 +1,94 @@
+trigger: none
+pool: project01-pool
+stages:
+- stage: SAST_Analysis
+  displayName: SAST-Analysis
+  jobs:
+  - job: staticAnalysis
+    displayName: Static-Analysis(SonarQube)
+    steps:
+    - task: SonarQubePrepare@8
+      displayName: PrepareAnalysisConfiguration
+      inputs:
+        SonarQube: 'sonar-sp'
+        scannerMode: 'cli'
+        configMode: 'manual'
+        cliProjectKey: 'ToDoUI'
+        cliSources: '.'
+    - task: SonarQubeAnalyze@8
+      displayName: CodeAnalysis
+      inputs:
+        jdkversion: 'JAVA_HOME_17_X64'
+    - task: SonarQubePublish@8
+      displayName: PublishQualityGateResult
+      inputs:
+        pollingTimeoutSec: '300'
+- stage: Biome_Linting
+  displayName: Biome-Linting
+  dependsOn: SAST_Analysis
+  jobs:
+  - job: linting
+    displayName: linting(Biome)
+    continueOnError: true
+    steps: 
+    - task: PowerShell@2
+      displayName: Download Biome
+      inputs:
+        targetType: 'inline'
+        script: |
+          Invoke-WebRequest `
+            -Uri https://github.com/biomejs/biome/releases/latest/download/biome-win32-x64.exe `
+            -OutFile "$(Agent.ToolsDirectory)\biome.exe"
+    - task: PowerShell@2
+      displayName: Lint-js-code
+      inputs:
+        targetType: 'inline'
+        script: '$(Agent.ToolsDirectory)/biome.exe lint ./src/'
+  # Biome ko npm se laga sakte hei official site se command mila
+    # - task: NodeTool@0
+    #   inputs:
+    #     versionSource: 'spec'
+    #     versionSpec: '16.x'
+    # - task: PowerShell@2
+    #   inputs:
+    #     targetType: 'inline'
+    #     script: |
+    #       npm i -D --save-exact @biomejs/biome
+    #       npx @biomejs/biome lint --write $(System.DefaultWorkingDirectory)/src/
+- stage: Build_And_Publish
+  displayName: Build-And-Publish
+  dependsOn: SAST_Analysis
+  jobs:
+  - job: Build_And_Publish
+    displayName: Build-And-Publish
+    steps:
+      - task: NodeTool@0
+        displayName: insall node
+        inputs:
+          versionSource: 'spec'
+          versionSpec: '16.x'
+      - task: PowerShell@2
+        displayName: npm install
+        inputs:
+          targetType: 'inline'
+          script: 'npm install'
+      - task: PowerShell@2
+        displayName: npm run build
+        inputs:
+          targetType: 'inline'
+          script: 'npm run build'
+      - task: ArchiveFiles@2
+        displayName: ArchiveBuild(.zip)
+        inputs:
+          rootFolderOrFile: '$(System.DefaultWorkingDirectory)/build/'
+          includeRootFolder: true
+          archiveType: 'zip'
+          archiveFile: '$(System.DefaultWorkingDirectory)/build.zip'
+          replaceExistingArchive: true
+
+      - task: PublishPipelineArtifact@1
+        displayName: PublishPipelineArtifact
+        inputs:
+          targetPath: '$(System.DefaultWorkingDirectory)/build.zip'
+          artifact: 'todo-ui-artifact'
+          publishLocation: 'pipeline'
